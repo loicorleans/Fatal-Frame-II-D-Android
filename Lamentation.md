@@ -1,1 +1,0 @@
-I was hoping this would work on my phone (MediaTek Helio G80), but I guess not. If your phone has the same specs as mine, just throw it in the trash.
