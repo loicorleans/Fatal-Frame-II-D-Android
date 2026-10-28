@@ -63,3 +63,7 @@ The Android host is based on work from [Shaolin Monks for Android](https://githu
 ## Legal notice
 
 This is an independent, unofficial project and is not affiliated with, endorsed by, or sponsored by the original game's publisher or rights holders. *FatalFrame2*, related characters, and game assets belong to their respective rights holders. This repository does not grant permission to redistribute the original game or its assets. Users are responsible for complying with applicable law and third-party licenses.
+
+## Lamentation
+
+I was hoping this would work on my phone (MediaTek Helio G80), but I guess not. If your phone has the same specs as mine, just throw it in the trash.
