@@ -1,0 +1,27 @@
+name: Unzip Project
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unzip ke root repo
+        run: |
+          unzip -o project.zip -x LICENSE -d .
+          rm project.zip
+
+      - name: Commit hasil
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -A
+          git commit -m "Unzip project.zip" || echo "Tidak ada perubahan"
+          git push
