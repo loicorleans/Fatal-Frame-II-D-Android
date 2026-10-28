@@ -58,7 +58,7 @@ Bug reports and technical contributions are welcome. Please include device model
 
 ## Credits and third-party software
 
-The Android host is based on work from [Black-Android](https://github.com/RanggaCasper/Black-Android) and the [Shaolin Monks for Android](https://github.com/RanggaCasper/ShaolinMonks-Android) project. Xbox recompilation/runtime support is provided by [XboxXBE-Recomp](https://github.com/TGP482/XboxXBE-Recomp). The project also uses SDL and other third-party components; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and the bundled `sdk/` notices for details.
+The Android host is based on work from [Shaolin Monks for Android](https://github.com/RanggaCasper/ShaolinMonks-Android) project. Xbox recompilation/runtime support is provided by [XboxXBE-Recomp](https://github.com/TGP482/XboxXBE-Recomp). The project also uses SDL and other third-party components; see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and the bundled `sdk/` notices for details.
 
 ## Legal notice
 
