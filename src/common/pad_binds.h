@@ -15,4 +15,13 @@ void ResetPadBindings();
 void LoadPadBindings();      // after the settings load
 std::string PressedPadInput();  // an input of any controller pressed now, empty for none
 
+// the buttons the settings panel steps with, of a controller Android handed over without its device (see Loose in
+// native/input.cpp): SDL has no gamepad for it, so the panel reads it here
+struct MenuButtons {
+    bool up = false, down = false, left = false, right = false;
+    bool a = false, b = false, x = false, y = false;
+    bool l1 = false, r1 = false, start = false, back = false;
+};
+bool LooseMenuButtons(MenuButtons& out);  // false without such a controller
+
 }  // namespace input

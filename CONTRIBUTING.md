@@ -1,3 +1,6 @@
+# Contributing
+
+Thanks for your interest in improving FatalFrame2 for Android.
 
 ## Bug reports
 

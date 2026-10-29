@@ -42,15 +42,15 @@ android {
         }
     }
 
-    // the release key from BLACK_KEYSTORE (a .jks path) and its passwords, as the release workflow sets them
-    def keystore = System.getenv("BLACK_KEYSTORE")
+    // the release key from KEYSTORE_FILE (a .jks path) and its passwords, as the release workflow sets them
+    def keystore = System.getenv("KEYSTORE_FILE")
     signingConfigs {
         if (keystore) {
             release {
                 storeFile file(keystore)
-                storePassword System.getenv("BLACK_KEYSTORE_PASSWORD")
-                keyAlias System.getenv("BLACK_KEY_ALIAS")
-                keyPassword System.getenv("BLACK_KEY_PASSWORD")
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
             }
         }
     }

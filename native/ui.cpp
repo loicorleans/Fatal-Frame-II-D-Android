@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include "common/menu.h"
+#include "common/pad_binds.h"
 #include "host.h"
 
 namespace ui {
@@ -132,7 +133,10 @@ void NewFrame(float width, float height) {
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
     SDL_Gamepad* pad = count ? SDL_GetGamepadFromID(ids[0]) : nullptr;
     SDL_free(ids);
-    if (!pad) return;
+    // without an SDL gamepad, a controller Android handed over without its device steps the panel the same way
+    input::MenuButtons loose;
+    bool has_loose = !pad && input::LooseMenuButtons(loose);
+    if (!pad && !has_loose) return;
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
     struct Map {
         ImGuiKey key;
@@ -146,15 +150,36 @@ void NewFrame(float width, float height) {
         {ImGuiKey_GamepadDpadUp, SDL_GAMEPAD_BUTTON_DPAD_UP},    {ImGuiKey_GamepadDpadDown, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
         {ImGuiKey_GamepadL1, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},  {ImGuiKey_GamepadR1, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
     };
+    // a button of either kind of controller
+    auto held = [&](SDL_GamepadButton b) {
+        if (pad) return SDL_GetGamepadButton(pad, b);
+        switch (b) {
+            case SDL_GAMEPAD_BUTTON_START: return loose.start;
+            case SDL_GAMEPAD_BUTTON_BACK: return loose.back;
+            case SDL_GAMEPAD_BUTTON_SOUTH: return loose.a;
+            case SDL_GAMEPAD_BUTTON_EAST: return loose.b;
+            case SDL_GAMEPAD_BUTTON_WEST: return loose.x;
+            case SDL_GAMEPAD_BUTTON_NORTH: return loose.y;
+            case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return loose.left;
+            case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return loose.right;
+            case SDL_GAMEPAD_BUTTON_DPAD_UP: return loose.up;
+            case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return loose.down;
+            case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return loose.l1;
+            case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return loose.r1;
+            default: return false;
+        }
+    };
     // a controller binding (the CONTROLLER page) takes the presses, and those held as it ended wait for release
     static bool held_off = false;
     bool any = false;
-    for (const Map& m : kMap) any |= SDL_GetGamepadButton(pad, m.button);
-    for (SDL_GamepadAxis a : {SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY})
-        any |= std::abs(SDL_GetGamepadAxis(pad, a)) > 9830;
+    for (const Map& m : kMap) any |= held(m.button);
+    if (pad)
+        for (SDL_GamepadAxis a : {SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY})
+            any |= std::abs(SDL_GetGamepadAxis(pad, a)) > 9830;
     if (app::Capturing()) held_off = true;
     else if (!any) held_off = false;
-    for (const Map& m : kMap) io.AddKeyEvent(m.key, !held_off && SDL_GetGamepadButton(pad, m.button));
+    for (const Map& m : kMap) io.AddKeyEvent(m.key, !held_off && held(m.button));
+    if (!pad) return;  // the loose controller's stick already steps as its D-pad
     auto stick = [&](ImGuiKey neg, ImGuiKey pos, SDL_GamepadAxis a) {
         float v = held_off ? 0 : SDL_GetGamepadAxis(pad, a) / 32767.0f;
         io.AddKeyAnalogEvent(neg, v < -0.3f, v < -0.3f ? -v : 0);

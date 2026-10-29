@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bitset>
 #include <cctype>
 #include <cstdio>
@@ -18,6 +19,7 @@
 #include <SDL3/SDL.h>
 
 #include "app/app.h"
+#include "common/menu.h"
 #include "common/options.h"
 #include "common/pad_binds.h"
 #include "core/log.h"
@@ -406,6 +408,19 @@ void OnPadEvent(const SDL_Event& e) {
     else if (e.type == SDL_EVENT_GAMEPAD_REMOVED) RemovePad(e.gdevice.which);
 }
 
+// R2 on a controller (the game's Black) opens and closes the settings panel, and no longer presses Black in the game;
+// the touch screen's Black button is not touched by this
+static void PanelOnR2(int port, Pad& p) {
+    static std::atomic<bool> held[4] = {};
+    if (port < 0 || port >= 4) return;
+    uint8_t v = p.analog[4];
+    bool was = held[port].load(std::memory_order_relaxed);
+    bool now = was ? v > 0x40 : v > 0x80;  // a pull past half presses, back under a quarter lets go
+    held[port].store(now, std::memory_order_relaxed);
+    if (now && !was) app::ToggleMenu();
+    p.analog[4] = 0;
+}
+
 Pad Poll(int port) {
     Pad p;
     PadBinds binds = PadBindsNow();
@@ -420,11 +435,33 @@ Pad Poll(int port) {
     constexpr int16_t kStickPushed = 16000;
     auto pushed = [](int16_t v) { return v > kStickPushed || v < -kStickPushed; };
     if (port == 0) MergeLoose(p, binds);
+    PanelOnR2(port, p);
     bool analog = std::any_of(std::begin(p.analog), std::end(p.analog), [](uint8_t a) { return a > 0x20; });
     if (p.buttons || analog || pushed(p.lx) || pushed(p.ly) || pushed(p.rx) || pushed(p.ry)) touch::PadUsed();
     touch::Apply(port, p);
     if (app::kGame.pad) app::kGame.pad(port, p);
     return p;
+}
+
+bool LooseMenuButtons(MenuButtons& out) {
+    std::lock_guard lock(g_loose_lock);
+    const Loose& l = g_loose;
+    if (!l.seen) return false;
+    auto key = [&](int code) { return l.keys[size_t(code)]; };
+    // Android's DPAD_*, the hat and the left stick all step; its y is down
+    out.up = key(19) || l.hy < -0.5f || l.ly < -0.5f;
+    out.down = key(20) || l.hy > 0.5f || l.ly > 0.5f;
+    out.left = key(21) || l.hx < -0.5f || l.lx < -0.5f;
+    out.right = key(22) || l.hx > 0.5f || l.lx > 0.5f;
+    out.a = key(96);   // BUTTON_A (cross)
+    out.b = key(97);   // BUTTON_B (circle)
+    out.x = key(99);   // BUTTON_X (square)
+    out.y = key(100);  // BUTTON_Y (triangle)
+    out.l1 = key(102);
+    out.r1 = key(103);
+    out.start = key(108);
+    out.back = key(109);
+    return true;
 }
 
 // the motors run until set again

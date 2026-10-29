@@ -1,4 +1,6 @@
 // CDirectSoundStream, the object carries the XDK's own vtable
+#include <unordered_map>
+
 #include "core/log.h"
 #include "sound/sound.h"
 #include "xdk/layout.h"
@@ -45,6 +47,16 @@ HLE_STDCALL(DirectSoundCreateStream, 2) {
     return 0;
 }
 
+// DIAGNOSTIC: the first 16 calls the title makes on each stream, with their arguments and what they got back. A subtitle that
+// goes at the moment its line starts is told something by one of these
+static void LogStreamCall(uint32_t obj, const char* name, uint32_t a1, uint32_t a2, uint32_t r) {
+    static std::unordered_map<uint32_t, int> calls;
+    static int total = 0;
+    if (total >= 3000 || calls[obj]++ >= 16) return;
+    total++;
+    LOGI("stream %08X: %s(%08X, %08X) = %08X", obj, name, a1, a2, r);
+}
+
 #define STREAM(name, nargs)                                     \
     static uint32_t str_##name(Voice& v, const Args& a);        \
     HLE_STDCALL(CDirectSoundStream_##name, nargs) {             \
@@ -54,6 +66,7 @@ HLE_STDCALL(DirectSoundCreateStream, 2) {
             std::lock_guard<std::recursive_mutex> lock(g_lock); \
             Voice* v = Find(a[0]);                              \
             r = v ? str_##name(*v, a) : kErrorFail;             \
+            LogStreamCall(a[0], #name, nargs > 1 ? a[1] : 0, nargs > 2 ? a[2] : 0, r); \
             flushed.swap(t_flushed);                            \
         }                                                       \
         Run(ctx, flushed);                                      \
@@ -91,6 +104,25 @@ STREAM(SetFormat, 2) {
 }
 STREAM(Release, 1) {
     if (--v.refs > 0) return uint32_t(v.refs);
+    // A line of speech is one short file: the title feeds all of it (the queue is not full) and lets go of the stream
+    // at once, and DirectSound plays on what it was given. A stream let go with a full queue was cut off mid-file
+    // (music that changes): that one stops here. The packets play from copies, the title may reuse its buffers.
+    if (v.active && !v.packets.empty() && v.packets.size() < v.max_packets) {
+        LOGI("stream %08X: released with %zu packets left to play, they play out (%u packets fed, %.2f s played)", v.obj,
+             v.packets.size(), v.dbg_packets, double(v.dbg_frames) / audio::kRate);
+        for (auto& pk : v.packets) {
+            uint32_t copy = mem::AllocSystem(std::max<uint32_t>(pk.size, 16));
+            std::memcpy(HostPtr(copy), HostPtr(pk.data), pk.size);
+            v.drain_mem.push_back(copy);
+            pk.data = copy;
+            pk.completed_ptr = pk.status_ptr = pk.context = 0;  // nothing of the title's is written to any more
+        }
+        v.callback = v.context = 0;
+        v.paused = v.sync = false;
+        v.dying = true;
+        v.ending = true;
+        return 0;
+    }
     FlushStream(v, "Release");
     uint32_t obj = v.obj;
     g_voices.erase(obj);

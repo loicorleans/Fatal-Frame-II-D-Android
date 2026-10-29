@@ -72,6 +72,19 @@ namespace {
 
 std::atomic<bool> g_open{false};
 
+// A controller steps through the panel in levels: the D-pad starts on the tabs (Left / Right step them), A goes into
+// the page's rows, and Y comes back out. On a value row A opens it for Left / Right, and A or Y closes it again.
+enum class PadFocus { Tabs, Rows };
+PadFocus g_pad_focus = PadFocus::Tabs;
+ImGuiID g_edit_id = 0;      // the value row A opened for the D-pad
+bool g_enter_rows = false;  // A on the tabs: the first row takes the focus
+bool g_back = false;        // Y pressed this frame; the first that can use it takes it
+
+// a controller drives the panel: one is plugged in and the keyboard is not the last thing used
+bool PadMode() { return (ImGui::GetIO().BackendFlags & ImGuiBackendFlags_HasGamepad) && !input::KeyboardActive(); }
+// the D-pad is on the tabs, so no row shows a focus
+bool OnTabs() { return PadMode() && g_pad_focus == PadFocus::Tabs; }
+
 // the dragon emblem's gold on blood red and black
 constexpr ImVec4 kPanelBg{0.030f, 0.012f, 0.014f, 0.96f};
 constexpr ImVec4 kBorder{0.58f, 0.43f, 0.17f, 0.95f};
@@ -326,12 +339,20 @@ int OptionRow(const char* label, const char* value) {
     RowBox box = MeasureRow();
     ImGui::PushID(label);
     int step = 0;
-    ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(box.row_w, box.row_h));
-    bool lit = ImGui::IsItemFocused() || ImGui::IsItemHovered();
+    bool opened = ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(box.row_w, box.row_h));
+    ImGuiID id = ImGui::GetItemID();
+    bool focused = ImGui::IsItemFocused();
+    ImVec2 item_min = ImGui::GetItemRectMin(), item_max = ImGui::GetItemRectMax();
+    // A on the controller opens the row for the D-pad, and closes it again; moving off the row ends it too
+    if (opened && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false)) g_edit_id = g_edit_id == id ? 0 : id;
+    if (g_edit_id == id && !focused) g_edit_id = 0;
+    bool editing = g_edit_id == id;
+    bool lit = (focused && !OnTabs()) || ImGui::IsItemHovered();
     if (lit) FillItem();
-    if (ImGui::IsItemFocused()) {
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft)) step = -1;
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight)) step = 1;
+    if (editing) ImGui::GetWindowDrawList()->AddRect(item_min, item_max, U32(kHeading), 0.0f, 0, 2.0f);
+    if (focused) {
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || (editing && ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft))) step = -1;
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || (editing && ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight))) step = 1;
     }
     RowLabel(box, label);
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav | ImGuiItemFlags_ButtonRepeat, true);  // held arrows keep stepping
@@ -970,7 +991,7 @@ void LinkRow(const Row& r) {
     RowBox box = MeasureRow();
     ImGui::PushID(r.label);
     bool open = ImGui::Selectable("##link", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(box.row_w, box.row_h));
-    if (ImGui::IsItemFocused() || ImGui::IsItemHovered()) FillItem();
+    if ((ImGui::IsItemFocused() && !OnTabs()) || ImGui::IsItemHovered()) FillItem();
     RowLabel(box, r.label);
     std::string value = Ui("OPEN");
     float value_x = box.row_x + box.row_w - box.block_w + box.row_h + ImGui::GetStyle().ItemSpacing.x;
@@ -1127,7 +1148,17 @@ void RefreshGuide() {
     g_guide_file.clear();
 }
 
+// the guide's text is drawn this much larger than the rest of the menu, for readability (1 = as the other pages)
+constexpr float kGuideTextScale = 1.5f;
+
+// scales the current window's text for as long as it lives, and puts it back on every way out of DrawGuide
+struct GuideTextScale {
+    GuideTextScale() { ImGui::SetWindowFontScale(kGuideTextScale); }
+    ~GuideTextScale() { ImGui::SetWindowFontScale(1.0f); }
+};
+
 void DrawGuide() {
+    GuideTextScale text_scale;
     RefreshGuide();
     if (g_guide.empty()) {
         Section("TAMBAHKAN PANDUANMU");
@@ -1138,15 +1169,31 @@ void DrawGuide() {
         DrawRowList(kGuideRows, std::size(kGuideRows));
         return;
     }
+    static int close_chapter = -1;  // Y closed this chapter's text: its header takes the focus back
+    int inside = -1;                // the chapter whose text holds the focus
     for (size_t i = 0; i < g_guide.size(); i++) {  // the chapters fold: only an open one is drawn
         const GuideChapter& c = g_guide[i];
         std::string head = c.title + "###guide" + std::to_string(i);
+        if (close_chapter == int(i)) {
+            ImGui::SetNextItemOpen(false);
+            ImGui::SetKeyboardFocusHere();
+            close_chapter = -1;
+        }
         if (!ImGui::CollapsingHeader(head.c_str())) continue;
-        for (const GuideLine& l : c.lines) {
+        for (size_t j = 0; j < c.lines.size(); j++) {
+            const GuideLine& l = c.lines[j];
             if (l.text.empty()) {
                 ImGui::Dummy(ImVec2(0, ImGui::GetFontSize() * 0.5f));
                 continue;
             }
+            // each paragraph is a stop of its own, so the D-pad reads down a long chapter
+            ImVec2 at = ImGui::GetCursorPos();
+            ImVec2 ts = ImGui::CalcTextSize(l.text.c_str(), nullptr, false, ImGui::GetContentRegionAvail().x);
+            ImGui::PushID(int(i * 10000 + j));
+            ImGui::Selectable("##para", false, 0, ImVec2(0, ts.y));
+            if (ImGui::IsItemFocused() && !OnTabs()) inside = int(i);
+            ImGui::PopID();
+            ImGui::SetCursorPos(at);
             ImGui::PushTextWrapPos(0.0f);
             if (l.sub) ImGui::PushStyleColor(ImGuiCol_Text, kHeading);
             ImGui::TextUnformatted(l.text.c_str());
@@ -1154,6 +1201,11 @@ void DrawGuide() {
             ImGui::PopTextWrapPos();
         }
         ImGui::Dummy(ImVec2(0, ImGui::GetFontSize() * 0.4f));
+    }
+    // Y inside a chapter closes it and puts the focus on its header
+    if (g_back && inside >= 0) {
+        close_chapter = inside;
+        g_back = false;
     }
 }
 
@@ -1259,10 +1311,15 @@ void Defaults() {
 // one tab a page, as wide as they share the line; LB / RB step them
 void DrawTabs() {
     int step = ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) - ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false);
+    // the D-pad's Left / Right step the tabs while it is on them
+    if (OnTabs()) step += ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight, false) - ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft, false);
     // a selection made here shows from the next frame, the tab drawn this one still reads as selected
     bool set = step && CaptureFree();
     int pages = int(std::size(kPages));
-    if (set) g_page = StepIndex(g_page, step, pages);
+    if (set) {
+        g_page = StepIndex(g_page, step, pages);
+        g_edit_id = 0;
+    }
     ImGui::PushStyleColor(ImGuiCol_Tab, kTab);
     ImGui::PushStyleColor(ImGuiCol_TabHovered, kTabHovered);
     ImGui::PushStyleColor(ImGuiCol_TabSelected, kHighlight);
@@ -1324,6 +1381,9 @@ void DrawFooter(float em) {
     const char* hint = "";
     if (g_capture >= 0) hint = "Press a key or mouse button to bind, Escape cancels";
     else if (g_pad_capture >= 0) hint = "Press a button on the controller to bind, wait 5 seconds to cancel";
+    else if (PadMode() && g_pad_focus == PadFocus::Tabs) hint = "D-pad: tabs    A: enter    R2: close";
+    else if (PadMode() && g_edit_id) hint = "D-pad left / right: change    A or Y: done";
+    else if (PadMode()) hint = "A: select    Y: back    R2: close";
     else if (g_page == kKeyboardPage && g_hovered_box >= 0) hint = "Right click or Delete clears the key";
     else if (g_page == kControllerPage && g_hovered_box >= 0) hint = "Right click or Delete restores the default";
     ImGui::TextUnformatted(Ui(hint, false).c_str());
@@ -1366,6 +1426,22 @@ void DragScroll() {
     ImGui::ClearActiveID();
 }
 
+// the controller's A and Y: from the tabs into the rows and back out
+void PadNavigate() {
+    if (!PadMode() || !CaptureFree()) return;
+    if (g_pad_focus == PadFocus::Tabs) {
+        if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false)) {
+            g_pad_focus = PadFocus::Rows;
+            g_enter_rows = true;
+        }
+        return;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)) {
+        if (g_edit_id) g_edit_id = 0;
+        else g_back = true;
+    }
+}
+
 void DrawPanel() {
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     float em = ImGui::GetFontSize();
@@ -1384,13 +1460,26 @@ void DrawPanel() {
     if (ImGui::Begin("##settings", nullptr, kFlags)) {
         DrawFrame();
         DrawTitle();
+        PadNavigate();
+        if (OnTabs()) ImGui::GetCurrentContext()->NavDisableHighlight = true;
         DrawTabs();
         float footer = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeightWithSpacing() + em;
         ImGui::BeginChild("##rows", ImVec2(0, -footer), ImGuiChildFlags_NavFlattened);
         g_hovered_box = -1;
+        if (g_enter_rows) {
+            g_enter_rows = false;
+            ImGui::GetCurrentContext()->NavDisableHighlight = false;
+            ImGui::SetKeyboardFocusHere();
+        }
         DrawRows(g_page);
         DragScroll();
         ImGui::EndChild();
+        // a Y nothing in the rows used goes back up to the tabs
+        if (g_back) {
+            g_back = false;
+            g_pad_focus = PadFocus::Tabs;
+            g_edit_id = 0;
+        }
         DrawFooter(em);
     }
     ImGui::End();
@@ -1480,6 +1569,10 @@ void ToggleMenu() {
     g_open.store(open, std::memory_order_relaxed);
     g_capture = -1;
     g_pad_capture = -1;
+    g_pad_focus = PadFocus::Tabs;
+    g_edit_id = 0;
+    g_enter_rows = false;
+    g_back = false;
     if (open) input::ReleaseCursor();
 }
 
@@ -1506,11 +1599,14 @@ void DrawFpsCounter(double fps) {
     const game::Options& o = game::Opt();
     if (!o.fps_counter || MenuOpen()) return;
     host::SamplePerf();
-    char text[48];
+    char text[96];
     // frame skip leaves frames out of the screen but not out of the game: both rates show while they differ
+    // the ms are the game's own frame time (1000 / game frames a second), what the game speed follows: 16.7 is full speed
     const float game_fps = game::g_game_fps.load();
     if (game_fps > 0 && game_fps > float(fps) * 1.15f && game_fps < 240.0f)
-        std::snprintf(text, sizeof(text), "%.0f FPS (GAME %.0f)", fps, double(game_fps));
+        std::snprintf(text, sizeof(text), "%.0f FPS (GAME %.0f)  %.1f ms", fps, double(game_fps), 1000.0 / double(game_fps));
+    else if (fps > 0.5)
+        std::snprintf(text, sizeof(text), "%.0f FPS  %.1f ms", fps, 1000.0 / fps);
     else
         std::snprintf(text, sizeof(text), "%.0f FPS", fps);
     std::string perf;
@@ -1560,6 +1656,9 @@ void DrawUi(double fps) {
     ImGuiIO& io = ImGui::GetIO();
     if (MenuOpen()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
     else io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+    // the controller's navigation waits while the D-pad is on the tabs: Left / Right step them, A goes in
+    if (MenuOpen() && OnTabs()) io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+    else io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     io.KeyRepeatRate = 0.1f;  // held arrows step ten times a second, ImGui's twenty is too fast for settings
     // scale the font with the output height: a phone's dense screen reads 13 px text at 540 rows to the height
     io.FontGlobalScale = std::max(1.0f, io.DisplaySize.y / 540.0f);

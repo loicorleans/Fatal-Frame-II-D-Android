@@ -457,6 +457,17 @@ void Render(float* out, uint32_t frames) {
         if (v.paused || v.sync || (!v.stream && !v.playing)) continue;
         MixVoice(v, out, send.data(), frames);
     }
+    // the released streams that have played out go
+    for (auto it = g_voices.begin(); it != g_voices.end();) {
+        Voice& v = it->second;
+        if (v.dying && !v.active) {
+            for (uint32_t m : v.drain_mem) mem::FreeSystem(m);
+            mem::FreeSystem(v.obj);
+            it = g_voices.erase(it);
+        } else {
+            ++it;
+        }
+    }
     g_reverb.Run(send.data(), out, frames);
 }
 

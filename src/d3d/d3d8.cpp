@@ -783,9 +783,23 @@ bool RenderTargetIsShown() {  // the title draws into one of the swap chain's su
     return false;
 }
 
+// the draw samples a swap chain surface as a texture (bloom, glow and ghost passes read the screen back). In a skipped
+// frame the swap chain is not redrawn, so what such a draw reads is stale; its result would pile up in any buffer
+// that lives on between frames
+bool ReadsShownSurface() {
+    for (uint32_t stage = 0; stage < 4; stage++) {
+        uint32_t tex = g_state.textures[stage];
+        if (!tex) continue;
+        uint32_t data = R32(tex + kResData);
+        for (uint32_t i = 0; i < g_buffer_count; i++)
+            if (SurfaceOf(g_buffers[i]).data == data) return true;
+    }
+    return false;
+}
+
 // called for each draw before it is recorded; true leaves it out
 bool SkipDraw() {
-    if (g_skip_frame && RenderTargetIsShown()) return true;
+    if (g_skip_frame && (RenderTargetIsShown() || ReadsShownSurface())) return true;
     if (!game::Opt().fog_layers && g_state.vs_handle == kFog2DVertexShader) return true;
     // PARTICLES: of the effect sprites drawn into the shown frame, every other one, every fourth or none are kept
     if (game::Opt().particles && g_state.vs_handle == kSpriteVertexShader && RenderTargetIsShown()) {

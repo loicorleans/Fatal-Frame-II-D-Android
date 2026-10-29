@@ -205,11 +205,21 @@ inline uint64_t mmx_map2(uint64_t a, uint64_t b, F f) {
     return out;
 }
 
+// false, with one log line, when a string instruction would touch guest memory that is not mapped (kernel/memory.cpp).
+// On the console such a copy reads or writes whatever is there; here it would end the process with a segfault
+extern "C" bool x86_string_range_ok(uint32_t esi, uint32_t edi, uint64_t bytes, uint32_t has_src);
+
 // rep movs: element by element semantics, fast path when the ranges cannot interfere
 inline void x86_rep_movs(X86Context& ctx, uint8_t* base, uint32_t w) {
     uint32_t n = ctx.ecx;
     if (!n) return;
     uint32_t bytes = n * w;
+    if (!ctx.df && !x86_string_range_ok(ctx.esi, ctx.edi, uint64_t(n) * w, 1)) {
+        ctx.esi += bytes;
+        ctx.edi += bytes;
+        ctx.ecx = 0;
+        return;
+    }
     if (!ctx.df && (ctx.edi - ctx.esi >= bytes || ctx.edi <= ctx.esi)) {
         std::memmove(base + ctx.edi, base + ctx.esi, bytes);
         ctx.esi += bytes;
@@ -229,6 +239,11 @@ inline void x86_rep_movs(X86Context& ctx, uint8_t* base, uint32_t w) {
 inline void x86_rep_stos(X86Context& ctx, uint8_t* base, uint32_t w) {
     uint32_t n = ctx.ecx;
     if (!n) return;
+    if (!ctx.df && !x86_string_range_ok(0, ctx.edi, uint64_t(n) * w, 0)) {
+        ctx.edi += n * w;
+        ctx.ecx = 0;
+        return;
+    }
     if (!ctx.df && w == 1) {
         std::memset(base + ctx.edi, uint8_t(ctx.eax), n);
         ctx.edi += n;

@@ -441,3 +441,19 @@ Stats Query() {
 }
 
 }  // namespace mem
+
+// Guard for rep movs / rep stos in the recompiled code (cpu/x86_ops.h). Only the first and the last page are looked at, which
+// is enough to catch a wild pointer. The first 50 hits are logged with both pointers and the length
+extern "C" bool x86_string_range_ok(uint32_t esi, uint32_t edi, uint64_t bytes, uint32_t has_src) {
+    auto ok = [&](uint32_t va) {
+        if (!bytes) return true;
+        uint64_t last = uint64_t(va) + bytes - 1;
+        return last <= 0xFFFFFFFFull && mem::IsCommitted(va) && mem::IsCommitted(uint32_t(last));
+    };
+    if (ok(edi) && (!has_src || ok(esi))) return true;
+    static int logged = 0;
+    if (logged++ < 50)
+        LOGE("guest string copy on unmapped memory skipped: esi %08X edi %08X bytes %llu%s", esi, edi, (unsigned long long)bytes,
+             has_src ? "" : " (fill)");
+    return false;
+}

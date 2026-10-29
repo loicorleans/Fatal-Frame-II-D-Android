@@ -81,6 +81,9 @@ struct Voice {
     uint32_t callback = 0;
     uint32_t context = 0;
     std::deque<Packet> packets;
+    // released by the title with its packets still to play: they play out from copies, then the voice goes
+    bool dying = false;
+    std::vector<uint32_t> drain_mem;
     // DIAGNOSTIC (no change in behaviour): stream play statistics for the log
     int64_t dbg_start_ms = 0;
     uint64_t dbg_frames = 0;  // frames the mixer played since the stream went active
