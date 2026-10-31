@@ -1,0 +1,26 @@
+# key rilis: jangan pernah masuk repo
+*.jks
+*.keystore
+local.properties
+out/
+
+# disalin otomatis oleh workflow dari default.xbe
+assets/
+
+# kode hasil recompile (turunan dari game), dibuat saat build
+generated/
+
+# build Gradle / CMake / Android
+.gradle/
+build/
+app/build/
+.cxx/
+app/.cxx/
+third_party/
+*.apk
+*.aab
+
+# editor
+.idea/
+*.iml
+.vscode/
